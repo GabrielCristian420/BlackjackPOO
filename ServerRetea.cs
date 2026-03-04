@@ -263,7 +263,7 @@ namespace BlackjackPOO
                     bufferString += Encoding.UTF8.GetString(buffer, 0, bytesRead);
                     int indexLinie;
 
-                    // Extragem mesajele bazat pe \n
+                    // Extragem mesajele bazat pe \0
                     while ((indexLinie = bufferString.IndexOf('\0')) >= 0)
                     {
                         string mesajComplet = bufferString.Substring(0, indexLinie);
