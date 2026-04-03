@@ -3,7 +3,7 @@
 ## Overview
 A fully functional, multiplayer Blackjack game built from scratch. This project has evolved into a **Distributed System**, combining a real-time **C# (.NET) Client/Server architecture** with a modern **Python (FastAPI) RESTful backend**. 
 
-> **🔗 Backend API Repository:** This game connects to a production-grade leaderboard backend built with FastAPI (Python): [Blackjack-Leaderboard-API](https://github.com/GabrielCristian420/Blackjack-Leaderboard-API)
+> ** Backend API Repository:** This game connects to a production-grade leaderboard backend built with FastAPI (Python): [Blackjack-Leaderboard-API](https://github.com/GabrielCristian420/Blackjack-Leaderboard-API)
 
 Initially developed to master Object-Oriented Programming and TCP socket communication, the application now demonstrates full-stack integration capabilities by asynchronously communicating with a dedicated database-driven leaderboard microservice.
 
