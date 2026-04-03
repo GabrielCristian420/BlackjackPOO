@@ -46,3 +46,5 @@ Initially developed to master Object-Oriented Programming and TCP socket communi
 ## Screenshots
 <img width="878" height="579" alt="gameplay1" src="https://github.com/user-attachments/assets/b13c7af4-4635-4b2b-a9ab-06addceb8a14" />
 <img width="1760" height="591" alt="gameplay2" src="https://github.com/user-attachments/assets/fe4a0534-5d7b-40f4-9180-4a2bb145cfbb" />
+<img width="878" height="587" alt="leaderboard" src="https://github.com/user-attachments/assets/477e7907-4ad6-416a-b8dd-fd6007c96eb5" />
+
