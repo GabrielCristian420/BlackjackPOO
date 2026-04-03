@@ -3,9 +3,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
 
 namespace BlackjackPOO
 {
@@ -14,7 +19,7 @@ namespace BlackjackPOO
         private Joc joc;
         private ClientRetea clientRetea;
         private ServerRetea serverRetea;
-        private Button btnHit, btnStand, btnNewGame, btnConnect, btnStartServer;
+        private Button btnHit, btnStand, btnNewGame, btnConnect, btnStartServer, btnLeaderboard;
         private TextBox txtNume, txtIP, txtPort, txtMiza;
         private Label lblJucator, lblDealer, lblScorJucator, lblScorDealer, lblStatus, lblMiza, lblDebug;
         private Panel pnlJucator, pnlDealer;
@@ -25,6 +30,18 @@ namespace BlackjackPOO
         private Label lblRezultat;
         private Thread serverThread;
         private bool joculCuMizaReala;
+        private bool scorTrimisRundaCurenta;
+        private string jwtToken;
+
+        private static readonly HttpClient httpClient = new HttpClient
+        {
+            BaseAddress = new Uri("http://127.0.0.1:8000")
+        };
+
+        private static readonly JavaScriptSerializer json = new JavaScriptSerializer();
+
+        private const string ApiUsername = "GameServer";
+        private const string ApiPassword = "password123";
 
         public Form1()
         {
@@ -259,6 +276,17 @@ namespace BlackjackPOO
             btnNewGame.Click += BtnNewGame_Click;
             this.Controls.Add(btnNewGame);
 
+            btnLeaderboard = new Button
+            {
+                Text = "LEADERBOARD",
+                Size = new Size(140, 45),
+                Location = new Point(500, 420),
+                BackColor = Color.Khaki,
+                Font = new Font("Arial", 10, FontStyle.Bold)
+            };
+            btnLeaderboard.Click += BtnLeaderboard_Click;
+            this.Controls.Add(btnLeaderboard);
+
             lblScorDealer = new Label
             {
                 Font = new Font("Arial", 11, FontStyle.Bold),
@@ -342,10 +370,17 @@ namespace BlackjackPOO
                 lblRezultat.Text = joc.Rezultat;
                 lblRezultat.Visible = true;
                 lblRezultat.BringToFront();
+
+                if (!scorTrimisRundaCurenta)
+                {
+                    scorTrimisRundaCurenta = true;
+                    _ = TrimiteScorFinalAsync();
+                }
             }
             else
             {
                 lblRezultat.Visible = false;
+                scorTrimisRundaCurenta = false;
             }
 
             DeseneazaCarti();
@@ -450,6 +485,7 @@ namespace BlackjackPOO
         private void BtnNewGame_Click(object sender, EventArgs e)
         {
             lblRezultat.Visible = false;
+            scorTrimisRundaCurenta = false;
             decimal miza = 1;
 
             if (joculCuMizaReala)
@@ -482,6 +518,11 @@ namespace BlackjackPOO
                     MessageBox.Show(ex.Message, "Eroare Miza", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
+        }
+
+        private async void BtnLeaderboard_Click(object sender, EventArgs e)
+        {
+            await AfiseazaLeaderboardGlobalAsync();
         }
 
         private void BtnConnect_Click(object sender, EventArgs e)
@@ -576,6 +617,240 @@ namespace BlackjackPOO
                 else
                     lblAltJucatori[i].Text = $"Jucator {i + 2}\nAșteptând...";
             }
+        }
+
+        private async Task TrimiteScorFinalAsync()
+        {
+            try
+            {
+                bool autentificat = await AsiguraAutentificareAsync();
+                if (!autentificat)
+                {
+                    Debug.WriteLine("Leaderboard API: autentificare eșuată.");
+                    return;
+                }
+
+                int scor = joculCuMizaReala
+                    ? Convert.ToInt32(Math.Round(joc.ManaJucator.BalantaRON, MidpointRounding.AwayFromZero))
+                    : joc.CalculeazaScor(joc.ManaJucator);
+
+                var payload = new Dictionary<string, object>
+                {
+                    { "player_name", txtNume.Text },
+                    { "score", scor }
+                };
+
+                var request = new HttpRequestMessage(HttpMethod.Post, "/scores")
+                {
+                    Content = new StringContent(json.Serialize(payload), Encoding.UTF8, "application/json")
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+
+                HttpResponseMessage response = await httpClient.SendAsync(request);
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    jwtToken = null;
+                    bool reautentificat = await AsiguraAutentificareAsync();
+                    if (!reautentificat)
+                    {
+                        Debug.WriteLine("Leaderboard API: re-autentificare eșuată.");
+                        return;
+                    }
+
+                    request = new HttpRequestMessage(HttpMethod.Post, "/scores")
+                    {
+                        Content = new StringContent(json.Serialize(payload), Encoding.UTF8, "application/json")
+                    };
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwtToken);
+                    response = await httpClient.SendAsync(request);
+                }
+
+                if (response.IsSuccessStatusCode)
+                    Debug.WriteLine("Leaderboard API: scor salvat.");
+                else
+                    Debug.WriteLine($"Leaderboard API: eroare POST /scores -> {(int)response.StatusCode} {response.ReasonPhrase}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Leaderboard API: excepție la trimiterea scorului -> {ex.Message}");
+            }
+        }
+
+        private async Task<bool> AsiguraAutentificareAsync()
+        {
+            if (!string.IsNullOrWhiteSpace(jwtToken))
+                return true;
+
+            try
+            {
+                var formContent = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    { "username", ApiUsername },
+                    { "password", ApiPassword }
+                });
+
+                HttpResponseMessage tokenResponse = await httpClient.PostAsync("/token", formContent);
+                if (tokenResponse.IsSuccessStatusCode)
+                {
+                    string tokenJson = await tokenResponse.Content.ReadAsStringAsync();
+                    string token = ExtrageTokenDinJson(tokenJson);
+                    if (!string.IsNullOrWhiteSpace(token))
+                    {
+                        jwtToken = token;
+                        return true;
+                    }
+                }
+
+                var loginPayload = new Dictionary<string, string>
+                {
+                    { "username", ApiUsername },
+                    { "password", ApiPassword }
+                };
+
+                HttpResponseMessage loginResponse = await httpClient.PostAsync(
+                    "/login",
+                    new StringContent(json.Serialize(loginPayload), Encoding.UTF8, "application/json"));
+
+                if (loginResponse.IsSuccessStatusCode)
+                {
+                    string loginJson = await loginResponse.Content.ReadAsStringAsync();
+                    string token = ExtrageTokenDinJson(loginJson);
+                    if (!string.IsNullOrWhiteSpace(token))
+                    {
+                        jwtToken = token;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Leaderboard API: excepție la autentificare -> {ex.Message}");
+                return false;
+            }
+        }
+
+        private static string ExtrageTokenDinJson(string jsonRaw)
+        {
+            try
+            {
+                var data = json.Deserialize<Dictionary<string, object>>(jsonRaw);
+                if (data == null)
+                    return null;
+
+                if (data.ContainsKey("access_token") && data["access_token"] != null)
+                    return data["access_token"].ToString();
+
+                if (data.ContainsKey("token") && data["token"] != null)
+                    return data["token"].ToString();
+
+                if (data.ContainsKey("jwt") && data["jwt"] != null)
+                    return data["jwt"].ToString();
+
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private async Task AfiseazaLeaderboardGlobalAsync()
+        {
+            try
+            {
+                HttpResponseMessage response = await httpClient.GetAsync("/scores");
+                if (!response.IsSuccessStatusCode)
+                {
+                    MessageBox.Show(
+                        $"Nu am putut încărca leaderboard-ul. Cod: {(int)response.StatusCode} {response.ReasonPhrase}",
+                        "Leaderboard",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                string responseJson = await response.Content.ReadAsStringAsync();
+                string leaderboardText = FormateazaLeaderboardText(responseJson);
+                MessageBox.Show(leaderboardText, "Leaderboard Global", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Eroare la conectarea cu API-ul de leaderboard: {ex.Message}",
+                    "Leaderboard",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        private static string FormateazaLeaderboardText(string responseJson)
+        {
+            try
+            {
+                object data = json.DeserializeObject(responseJson);
+                object candidateList = data;
+
+                var dict = data as Dictionary<string, object>;
+                if (dict != null)
+                {
+                    if (dict.ContainsKey("items"))
+                        candidateList = dict["items"];
+                    else if (dict.ContainsKey("scores"))
+                        candidateList = dict["scores"];
+                    else if (dict.ContainsKey("results"))
+                        candidateList = dict["results"];
+                    else if (dict.ContainsKey("data"))
+                        candidateList = dict["data"];
+                }
+
+                var list = candidateList as object[];
+                if (list == null || list.Length == 0)
+                    return "Nu există scoruri în leaderboard încă.";
+
+                var lines = new List<string>();
+                lines.Add("Top scoruri:");
+
+                int rank = 1;
+                foreach (object entryObject in list)
+                {
+                    var entry = entryObject as Dictionary<string, object>;
+                    if (entry == null)
+                        continue;
+
+                    string nume = ExtrageCamp(entry, "player_name", "name", "username");
+                    string scor = ExtrageCamp(entry, "score", "best_score", "value");
+                    if (string.IsNullOrWhiteSpace(nume))
+                        nume = "Unknown";
+                    if (string.IsNullOrWhiteSpace(scor))
+                        scor = "0";
+
+                    lines.Add($"{rank}. {nume} - {scor}");
+                    rank++;
+                    if (rank > 10)
+                        break;
+                }
+
+                if (lines.Count == 1)
+                    return "Nu există scoruri în leaderboard încă.";
+
+                return string.Join(Environment.NewLine, lines);
+            }
+            catch
+            {
+                return "Răspuns leaderboard primit, dar formatul nu a putut fi interpretat.";
+            }
+        }
+
+        private static string ExtrageCamp(Dictionary<string, object> entry, params string[] chei)
+        {
+            foreach (string cheie in chei)
+            {
+                if (entry.ContainsKey(cheie) && entry[cheie] != null)
+                    return entry[cheie].ToString();
+            }
+            return string.Empty;
         }
     }
 }
